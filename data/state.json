@@ -1,0 +1,8 @@
+{
+  "queue": [],
+  "running": false,
+  "next_run": null,
+  "last_update_id": 0,
+  "interval_minutes": 60,
+  "admin_user_ids": []
+}
