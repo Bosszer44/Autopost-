@@ -1,0 +1,6 @@
+# Telegram Auto Post Bot
+# This project uses only Python Standard Library — no external dependencies required
+# Python 3.9+ recommended (for zoneinfo support)
+
+# For local development only:
+# python-dotenv>=1.0.0
