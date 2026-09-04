@@ -8,6 +8,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
+from time import sleep
 from zoneinfo import ZoneInfo
 
 STATE_FILE = Path("data/state.json")
@@ -189,6 +190,15 @@ def updates(state):
         elif update.get("message"): changed = handle_message(state, update["message"]) or changed
     return changed
 
+def run_worker():
+    while True:
+        state = load_state()
+        changed = updates(state)
+        if changed is None:
+            return 1
+        if changed or post_due(state): save_state(state)
+        sleep(1)
+
 def post_due(state):
     if not state["running"]: return False
     last = parse_time(state.get("last_posted_time"))
@@ -204,6 +214,7 @@ def post_due(state):
     return True
 
 def main():
+    if os.environ.get("TELEGRAM_RUN_MODE") == "worker": return run_worker()
     state = load_state(); changed = updates(state)
     if changed is None: return 1
     if changed or post_due(state): save_state(state)
