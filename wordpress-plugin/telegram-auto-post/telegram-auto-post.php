@@ -175,7 +175,8 @@ final class TAP_Telegram_Auto_Post {
         $table = self::table_name();
         $pending = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$table} WHERE bot_id = %s AND status = 'pending'", $bot_id));
         $bot = $this->bot($bot_id);
-        return "🤖 {$bot['name']}\n\nสถานะ: " . (!empty($bot['running']) ? '🟢 กำลังทำงาน' : '⏸ หยุด') . "\n⏳ รอส่ง: {$pending}\n⏱ ช่วงเวลา: {$bot['interval_minutes']} นาที";
+            $hours = max(1, (int) ceil((int) $bot['interval_minutes'] / 60));
+            return "🤖 {$bot['name']}\n\nสถานะ: " . (!empty($bot['running']) ? '🟢 กำลังทำงาน' : '⏸ หยุด') . "\n⏳ รอส่ง: {$pending}\n⏱ ช่วงเวลา: {$hours} ชั่วโมง";
     }
 
     private function queue_text($bot_id) {
@@ -259,11 +260,11 @@ final class TAP_Telegram_Auto_Post {
         <p>ตั้งค่าได้หลายบอท ข้อมูลจะไม่ถูกแสดงบนหน้าเว็บผู้เข้าชม</p>
         <?php if (!empty($_GET['tap_saved'])): ?><div class="notice notice-success is-dismissible"><p>บันทึกการตั้งค่าแล้ว</p></div><?php endif; ?>
         <h2>บอทที่ตั้งค่าไว้</h2><table class="widefat"><thead><tr><th>ชื่อ</th><th>สถานะ</th><th>ช่วงเวลา</th><th>Webhook</th><th></th></tr></thead><tbody>
-        <?php foreach ($bots as $id => $bot): ?><tr><td><?php echo esc_html($bot['name']); ?></td><td><?php echo !empty($bot['running']) ? 'กำลังทำงาน' : 'หยุด'; ?></td><td><?php echo esc_html($bot['interval_minutes']); ?> นาที</td><td><code><?php echo esc_html(rest_url('telegram-auto-post/v1/webhook/' . $id . '/' . $bot['webhook_secret'])); ?></code></td><td><a class="button" href="<?php echo esc_url(admin_url('options-general.php?page=tap-settings&edit=' . $id)); ?>">แก้ไข</a></td></tr><?php endforeach; ?>
+        <?php foreach ($bots as $id => $bot): ?><tr><td><?php echo esc_html($bot['name']); ?></td><td><?php echo !empty($bot['running']) ? 'กำลังทำงาน' : 'หยุด'; ?></td><td><?php echo esc_html(max(1, (int) ceil((int) $bot['interval_minutes'] / 60))); ?> ชั่วโมง</td><td><code><?php echo esc_html(rest_url('telegram-auto-post/v1/webhook/' . $id . '/' . $bot['webhook_secret'])); ?></code></td><td><a class="button" href="<?php echo esc_url(admin_url('options-general.php?page=tap-settings&edit=' . $id)); ?>">แก้ไข</a></td></tr><?php endforeach; ?>
         </tbody></table>
         <h2><?php echo $edit ? 'แก้ไขบอท' : 'เพิ่มบอท'; ?></h2><form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
         <?php wp_nonce_field('tap_save_bot'); ?><input type="hidden" name="action" value="tap_save_bot"><input type="hidden" name="bot_id" value="<?php echo esc_attr($edit['id'] ?? ''); ?>">
-        <table class="form-table"><tr><th><label>ชื่อบอท</label></th><td><input required name="name" class="regular-text" value="<?php echo esc_attr($edit['name'] ?? ''); ?>"></td></tr><tr><th><label>Bot Token</label></th><td><input required name="token" type="password" class="regular-text" value="<?php echo esc_attr($edit['token'] ?? ''); ?>" autocomplete="new-password"></td></tr><tr><th><label>Target Chat ID</label></th><td><input required name="target_chat_id" class="regular-text" value="<?php echo esc_attr($edit['target_chat_id'] ?? ''); ?>"></td></tr><tr><th><label>Admin User ID</label></th><td><input required name="admin_user_id" class="regular-text" value="<?php echo esc_attr($edit['admin_user_id'] ?? ''); ?>"></td></tr><tr><th><label>ช่วงเวลา (นาที)</label></th><td><input required min="1" type="number" name="interval_minutes" value="<?php echo esc_attr($edit['interval_minutes'] ?? 60); ?>"></td></tr><tr><th>เปิดใช้งาน</th><td><label><input type="checkbox" name="running" value="1" <?php checked(!empty($edit['running'])); ?>> เริ่มส่งตามคิว</label></td></tr></table>
+        <table class="form-table"><tr><th><label>ชื่อบอท</label></th><td><input required name="name" class="regular-text" value="<?php echo esc_attr($edit['name'] ?? ''); ?>"></td></tr><tr><th><label>Bot Token</label></th><td><input required name="token" type="password" class="regular-text" value="<?php echo esc_attr($edit['token'] ?? ''); ?>" autocomplete="new-password"></td></tr><tr><th><label>Target Chat ID</label></th><td><input required name="target_chat_id" class="regular-text" value="<?php echo esc_attr($edit['target_chat_id'] ?? ''); ?>"></td></tr><tr><th><label>Admin User ID</label></th><td><input required name="admin_user_id" class="regular-text" value="<?php echo esc_attr($edit['admin_user_id'] ?? ''); ?>"></td></tr><tr><th><label>ช่วงเวลา (ชั่วโมง)</label></th><td><input required min="1" type="number" name="interval_hours" value="<?php echo esc_attr(max(1, (int) ceil((int) ($edit['interval_minutes'] ?? 60) / 60))); ?>"></td></tr><tr><th>เปิดใช้งาน</th><td><label><input type="checkbox" name="running" value="1" <?php checked(!empty($edit['running'])); ?>> เริ่มส่งตามคิว</label></td></tr></table>
         <?php submit_button('บันทึกและตั้ง Webhook'); ?></form></div>
         <?php
     }
@@ -272,7 +273,8 @@ final class TAP_Telegram_Auto_Post {
         if (!current_user_can('manage_options')) wp_die('Forbidden'); check_admin_referer('tap_save_bot');
         $id = sanitize_key($_POST['bot_id'] ?? '') ?: 'bot_' . wp_generate_password(8, false, false); $bots = $this->bots();
         $old = $bots[$id] ?? [];
-        $bots[$id] = ['id' => $id, 'name' => sanitize_text_field($_POST['name']), 'token' => sanitize_text_field($_POST['token']), 'target_chat_id' => sanitize_text_field($_POST['target_chat_id']), 'admin_user_id' => sanitize_text_field($_POST['admin_user_id']), 'interval_minutes' => max(1, absint($_POST['interval_minutes'])), 'running' => !empty($_POST['running']), 'webhook_secret' => $old['webhook_secret'] ?? wp_generate_password(32, false, false)];
+            $interval_hours = max(1, absint($_POST['interval_hours'] ?? 1));
+            $bots[$id] = ['id' => $id, 'name' => sanitize_text_field($_POST['name']), 'token' => sanitize_text_field($_POST['token']), 'target_chat_id' => sanitize_text_field($_POST['target_chat_id']), 'admin_user_id' => sanitize_text_field($_POST['admin_user_id']), 'interval_minutes' => $interval_hours * 60, 'running' => !empty($_POST['running']), 'webhook_secret' => $old['webhook_secret'] ?? wp_generate_password(32, false, false)];
         update_option(self::OPTION, $bots, false);
         $url = rest_url('telegram-auto-post/v1/webhook/' . $id . '/' . $bots[$id]['webhook_secret']);
         $this->telegram($bots[$id], 'setWebhook', ['url' => $url, 'allowed_updates' => wp_json_encode(['message', 'callback_query'])]);
