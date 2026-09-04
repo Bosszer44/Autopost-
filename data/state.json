@@ -3,6 +3,7 @@
   "running": false,
   "next_run": null,
   "last_update_id": 0,
+  "last_posted_time": null,
   "interval_minutes": 60,
-  "admin_user_ids": []
+  "waiting_for_urls": false
 }

@@ -1,136 +1,208 @@
-import json, os, re, time, urllib.parse, urllib.request
+"""Serverless, admin-only Telegram URL auto-posting bot."""
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
-TOKEN=os.environ["TELEGRAM_BOT_TOKEN"]
-TARGET=os.environ["TELEGRAM_TARGET_CHAT_ID"]
-STATE_FILE="data/state.json"
-TZ=ZoneInfo("Asia/Bangkok")
-API=f"https://api.telegram.org/bot{TOKEN}/"
+STATE_FILE = Path("data/state.json")
+TZ = ZoneInfo("Asia/Bangkok")
+URL_PATTERN = re.compile(r"https?://[^\s<>]+")
 
-def tg(method, params=None):
-    data=urllib.parse.urlencode(params or {}).encode()
-    req=urllib.request.Request(API+method,data=data)
-    with urllib.request.urlopen(req,timeout=30) as r:
-        return json.loads(r.read().decode())
+class TelegramError(RuntimeError):
+    pass
 
-def load():
-    with open(STATE_FILE,encoding="utf-8") as f:return json.load(f)
-def save(s):
-    with open(STATE_FILE,"w",encoding="utf-8") as f:json.dump(s,f,ensure_ascii=False,indent=2)
+def required(name):
+    value = os.environ.get(name, "").strip()
+    if not value or value.startswith("your_"):
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
+def now(): return datetime.now(TZ)
+def parse_time(value): return datetime.fromisoformat(value) if value else None
+def duration(state): return timedelta(minutes=int(state["interval_minutes"]))
+
+def api(state, method, parameters=None):
+    data = urllib.parse.urlencode(parameters or {}).encode("utf-8")
+    request = urllib.request.Request(f"https://api.telegram.org/bot{state['_token']}/{method}", data=data)
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        if error.code == 409: raise TelegramError("WEBHOOK_CONFLICT") from error
+        raise TelegramError(f"Telegram API returned HTTP {error.code}") from error
+    except (urllib.error.URLError, TimeoutError) as error:
+        raise TelegramError("Telegram API request failed") from error
+    if not payload.get("ok"): raise TelegramError("Telegram API returned an unsuccessful response")
+    return payload["result"]
+
+def load_state():
+    with STATE_FILE.open(encoding="utf-8") as file: state = json.load(file)
+    state.setdefault("queue", [])
+    state.setdefault("running", False)
+    state.setdefault("next_run", None)
+    state.setdefault("last_update_id", 0)
+    state.setdefault("last_posted_time", None)
+    state.setdefault("interval_minutes", 60)
+    state.setdefault("waiting_for_urls", False)
+    state["_token"] = required("TELEGRAM_BOT_TOKEN")
+    state["_target"] = required("TELEGRAM_TARGET_CHAT_ID")
+    state["_admin"] = required("TELEGRAM_ADMIN_USER_ID")
+    return state
+
+def save_state(state):
+    stored = {key: value for key, value in state.items() if not key.startswith("_")}
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with STATE_FILE.open("w", encoding="utf-8") as file:
+        json.dump(stored, file, ensure_ascii=False, indent=2)
+        file.write("\n")
+
+def private_admin(state, event):
+    sender = event.get("from", {})
+    chat = event.get("chat") or event.get("message", {}).get("chat", {})
+    return str(sender.get("id")) == state["_admin"] and chat.get("type") == "private"
+
+def pending(state): return [item for item in state["queue"] if item["status"] == "pending"]
+def update_next(state):
+    values = [item["scheduled_at"] for item in pending(state) if item.get("scheduled_at")]
+    state["next_run"] = min(values) if values else None
+
+def rebuild(state, first):
+    for item in pending(state):
+        item["scheduled_at"] = first.isoformat()
+        first += duration(state)
+    update_next(state)
+
+def schedule_missing(state):
+    valid = [parse_time(item.get("scheduled_at")) for item in pending(state)]
+    valid = [value for value in valid if value]
+    cursor = max(valid) + duration(state) if valid else now()
+    for item in pending(state):
+        if not item.get("scheduled_at"):
+            item["scheduled_at"] = cursor.isoformat()
+            cursor += duration(state)
+    update_next(state)
+
+def panel(state):
+    count = len(pending(state)); sent = sum(item["status"] == "sent" for item in state["queue"])
+    status = "🟢 กำลังทำงาน" if state["running"] else "⏸ หยุด"
+    return f"🤖 AUTO POST BOT\n\nสถานะ: {status}\n📋 คิวทั้งหมด: {len(state['queue'])}\n⏳ รอส่ง: {count}\n✅ ส่งแล้ว: {sent}\n⏰ โพสต์ถัดไป: {state.get('next_run') or '-'}\n⏱ ช่วงเวลา: {state['interval_minutes']} นาที"
 
 def keyboard():
-    return {"inline_keyboard":[
-      [{"text":"➕ เพิ่มลิงก์","callback_data":"add"},{"text":"📋 ดูคิว","callback_data":"queue"}],
-      [{"text":"▶️ เริ่มโพสต์","callback_data":"start"},{"text":"⏸ หยุด","callback_data":"stop"}],
-      [{"text":"⏭ ข้าม","callback_data":"skip"},{"text":"🗑 ล้างคิว","callback_data":"clear"}],
-      [{"text":"📊 สถานะ","callback_data":"status"}]
+    return {"inline_keyboard": [
+        [{"text":"➕ เพิ่มลิงก์","callback_data":"add_url"},{"text":"📋 ดูคิว","callback_data":"view_queue"}],
+        [{"text":"▶️ เริ่มโพสต์","callback_data":"start_posting"},{"text":"⏸ หยุด","callback_data":"stop_posting"}],
+        [{"text":"⏭ ข้าม","callback_data":"skip_next"},{"text":"🗑 ล้างคิว","callback_data":"clear_queue"}],
+        [{"text":"📊 สถานะ","callback_data":"show_status"}]
     ]}
 
-def home(s):
-    q=s["queue"]; pending=sum(x["status"]=="pending" for x in q); sent=sum(x["status"]=="sent" for x in q)
-    nxt=s.get("next_run") or "-"
-    return (f"🤖 AUTO POST BOT\n━━━━━━━━━━━━━━━━\n\n"
-            f"สถานะ: {'🟢 กำลังทำงาน' if s['running'] else '⏸ หยุด'}\n"
-            f"📋 คิวทั้งหมด: {len(q)}\n⏳ รอส่ง: {pending}\n✅ ส่งแล้ว: {sent}\n"
-            f"⏱ ช่วงเวลา: {s['interval_minutes']} นาที\n⏰ รอบถัดไป: {nxt}")
+def control(state, chat_id, text, markup=None):
+    params = {"chat_id": chat_id, "text": text}
+    if markup: params["reply_markup"] = json.dumps(markup, ensure_ascii=False)
+    api(state, "sendMessage", params)
 
-def send(chat,text,markup=None):
-    p={"chat_id":chat,"text":text}
-    if markup:p["reply_markup"]=json.dumps(markup,ensure_ascii=False)
-    return tg("sendMessage",p)
+def queue_text(state):
+    rows = ["📋 คิวโพสต์"]
+    for i, item in enumerate(state["queue"], 1):
+        icon = {"pending":"⏳", "sent":"✅", "skipped":"⏭"}.get(item["status"], "•")
+        rows.append(f"{i}. {icon} {item['url']}")
+        if item.get("scheduled_at"): rows.append(f"   ⏰ {item['scheduled_at']}")
+    return "\n".join(rows) if len(rows) > 1 else "📋 ยังไม่มีคิว"
 
-def urls(text):
-    return list(dict.fromkeys(re.findall(r'https?://[^\s<>]+',text)))
+def add_urls(state, text):
+    existing = {item["url"] for item in state["queue"]}; added = 0; duplicates = 0
+    for url in dict.fromkeys(URL_PATTERN.findall(text)):
+        if url in existing: duplicates += 1; continue
+        state["queue"].append({"url":url,"status":"pending","scheduled_at":None,"sent_at":None})
+        existing.add(url); added += 1
+    if state["running"] and added: schedule_missing(state)
+    return added, duplicates
 
-def add_urls(s, arr):
-    existing={x["url"] for x in s["queue"]}
-    added=0; dup=0
-    for u in arr:
-        if u in existing: dup+=1; continue
-        s["queue"].append({"url":u,"status":"pending","scheduled_at":None,"sent_at":None})
-        existing.add(u); added+=1
-    return added,dup
+def start(state):
+    state["running"] = True
+    scheduled = [parse_time(item.get("scheduled_at")) for item in pending(state)]
+    valid = [value for value in scheduled if value]
+    if valid and min(valid) >= now():
+        schedule_missing(state)
+        return
+    last = parse_time(state.get("last_posted_time"))
+    rebuild(state, max(now(), last + duration(state)) if last else now())
 
-def schedule_pending(s):
-    now=datetime.now(TZ)
-    # Preserve existing scheduled times; append new pending URLs after latest schedule.
-    scheduled=[x["scheduled_at"] for x in s["queue"] if x["status"]=="pending" and x["scheduled_at"]]
-    if scheduled:
-        last=max(datetime.fromisoformat(x) for x in scheduled)
-        if last<now:last=now
-    else:last=now
-    for x in s["queue"]:
-        if x["status"]=="pending" and not x["scheduled_at"]:
-            x["scheduled_at"]=last.isoformat()
-            last=last+timedelta(minutes=s["interval_minutes"])
-    if any(x["status"]=="pending" for x in s["queue"]):
-        s["next_run"]=min(x["scheduled_at"] for x in s["queue"] if x["status"]=="pending" and x["scheduled_at"])
+def skip(state):
+    items = sorted(pending(state), key=lambda item: item.get("scheduled_at") or "")
+    if not items: return False
+    items[0]["status"] = "skipped"
+    last = parse_time(state.get("last_posted_time"))
+    rebuild(state, max(now(), last + duration(state)) if last else now())
+    return True
 
-def process_updates(s):
-    offset=s.get("last_update_id",0)+1
-    try:r=tg("getUpdates",{"offset":offset,"timeout":1})
-    except Exception:return False
-    changed=False
-    for u in r.get("result",[]):
-        s["last_update_id"]=u["update_id"]; changed=True
-        m=u.get("message"); c=u.get("callback_query")
-        if c:
-            uid=c["from"]["id"]; chat=c["message"]["chat"]["id"]; d=c["data"]
-            tg("answerCallbackQuery",{"callback_query_id":c["id"]})
-            if d=="add": send(chat,"➕ เพิ่มลิงก์\n\nส่ง URL ได้หลายบรรทัดในข้อความเดียว\n/cancel เพื่อยกเลิก")
-            elif d=="queue":
-                lines=["📋 QUEUE","━━━━━━━━━━━━━━━━"]
-                for i,x in enumerate(s["queue"],1):
-                    lines.append(f"#{i} {'✅' if x['status']=='sent' else '⏳'} {x['url']}")
-                    if x.get("scheduled_at"):lines.append(f"⏰ {x['scheduled_at']}")
-                send(chat,"\n".join(lines) if len(lines)>2 else "📋 ยังไม่มีคิว")
-            elif d=="start":
-                s["running"]=True;schedule_pending(s);send(chat,home(s));changed=True
-            elif d=="stop":
-                s["running"]=False;send(chat,home(s));changed=True
-            elif d=="skip":
-                for x in s["queue"]:
-                    if x["status"]=="pending":x["status"]="skipped";break
-                schedule_pending(s);send(chat,home(s));changed=True
-            elif d=="clear":
-                s["queue"]=[x for x in s["queue"] if x["status"] not in ("pending","skipped")]
-                s["next_run"]=None;send(chat,home(s));changed=True
-            elif d=="status":send(chat,home(s))
-            continue
-        if not m:continue
-        chat=m["chat"]["id"]; text=(m.get("text") or "").strip()
-        if text=="/start" or text=="/menu":send(chat,home(s),keyboard());continue
-        if text=="/cancel":send(chat,"ยกเลิกแล้ว");continue
-        if text.startswith("/add "):
-            a,b=add_urls(s,urls(text[5:]));send(chat,f"✅ เพิ่ม {a} ลิงก์\n⚠️ ซ้ำ {b}");changed=True;continue
-        if text:
-            arr=urls(text)
-            if arr:
-                a,b=add_urls(s,arr);send(chat,f"✅ รับลิงก์แล้ว\nเพิ่มใหม่: {a}\nซ้ำ: {b}\n\nกด ▶️ เริ่มโพสต์",keyboard());changed=True
-    return changed
-
-def send_due(s):
-    if not s["running"]:return False
-    now=datetime.now(TZ)
-    due=[x for x in s["queue"] if x["status"]=="pending" and x.get("scheduled_at") and datetime.fromisoformat(x["scheduled_at"])<=now]
-    if not due:return False
-    x=sorted(due,key=lambda z:z["scheduled_at"])[0]
-    r=tg("sendMessage",{"chat_id":TARGET,"text":x["url"],"disable_web_page_preview":"false"})
-    if r.get("ok"):
-        x["status"]="sent";x["sent_at"]=now.isoformat()
-        pending=[z for z in s["queue"] if z["status"]=="pending" and z.get("scheduled_at")]
-        if pending:s["next_run"]=min(z["scheduled_at"] for z in pending)
-        else:
-            s["next_run"]=None
-            # If there are newly appended unscheduled links, continue cadence.
-            schedule_pending(s)
-        return True
+def handle_message(state, message):
+    if not private_admin(state, message): return False
+    text = (message.get("text") or "").strip(); chat = message["chat"]["id"]
+    if text in ("/start", "/menu"):
+        state["waiting_for_urls"] = False; control(state, chat, panel(state), keyboard()); return True
+    if text == "/cancel": state["waiting_for_urls"] = False; control(state, chat, "ยกเลิกการเพิ่มลิงก์แล้ว"); return True
+    if text == "/queue": control(state, chat, queue_text(state)); return True
+    if text == "/status": control(state, chat, panel(state), keyboard()); return True
+    if text == "/stop": state["running"] = False; control(state, chat, panel(state), keyboard()); return True
+    if text == "/skip": control(state, chat, "ข้ามลิงก์ถัดไปแล้ว" if skip(state) else "ไม่มีลิงก์รอส่ง", keyboard()); return True
+    if text.startswith("/add") or state.get("waiting_for_urls"):
+        added, duplicates = add_urls(state, text[4:] if text.startswith("/add") else text)
+        state["waiting_for_urls"] = False
+        control(state, chat, f"เพิ่ม {added} ลิงก์ | ซ้ำ {duplicates} ลิงก์", keyboard()); return True
     return False
 
-s=load()
-changed=process_updates(s)
-if s["running"] and any(x["status"]=="pending" and not x.get("scheduled_at") for x in s["queue"]):
-    schedule_pending(s);changed=True
-if send_due(s):changed=True
-if changed:save(s)
+def handle_callback(state, callback):
+    if not private_admin(state, callback): return False
+    api(state, "answerCallbackQuery", {"callback_query_id": callback["id"]})
+    action = callback.get("data"); chat = callback["message"]["chat"]["id"]
+    if action == "add_url": state["waiting_for_urls"] = True; control(state, chat, "➕ ส่ง URL ได้หลายบรรทัดในข้อความถัดไป\n/cancel เพื่อยกเลิก")
+    elif action == "view_queue": control(state, chat, queue_text(state))
+    elif action == "start_posting": start(state); control(state, chat, panel(state), keyboard())
+    elif action == "stop_posting": state["running"] = False; control(state, chat, panel(state), keyboard())
+    elif action == "skip_next": control(state, chat, "ข้ามลิงก์ถัดไปแล้ว" if skip(state) else "ไม่มีลิงก์รอส่ง", keyboard())
+    elif action == "clear_queue": state["queue"] = [item for item in state["queue"] if item["status"] == "sent"]; update_next(state); control(state, chat, "ล้างคิวที่ยังไม่ส่งแล้ว (เก็บประวัติส่งแล้ว)", keyboard())
+    elif action == "show_status": control(state, chat, panel(state), keyboard())
+    else: return False
+    return True
+
+def updates(state):
+    try: results = api(state, "getUpdates", {"offset": state["last_update_id"] + 1, "timeout": 1})
+    except TelegramError as error:
+        if str(error) == "WEBHOOK_CONFLICT": print("ERROR: A Telegram webhook is configured. Please remove it using Telegram Bot API.", file=sys.stderr); return None
+        print(f"WARNING: {error}", file=sys.stderr); return False
+    changed = False
+    for update in results:
+        state["last_update_id"] = update["update_id"]; changed = True
+        if update.get("callback_query"): changed = handle_callback(state, update["callback_query"]) or changed
+        elif update.get("message"): changed = handle_message(state, update["message"]) or changed
+    return changed
+
+def post_due(state):
+    if not state["running"]: return False
+    last = parse_time(state.get("last_posted_time"))
+    if last and now() < last + duration(state): return False
+    due = [item for item in pending(state) if item.get("scheduled_at") and parse_time(item["scheduled_at"]) <= now()]
+    if not due: return False
+    item = min(due, key=lambda candidate: candidate["scheduled_at"])
+    try: api(state, "sendMessage", {"chat_id":state["_target"],"text":item["url"],"disable_web_page_preview":"false"})
+    except TelegramError as error: print(f"WARNING: URL was not sent: {error}", file=sys.stderr); return False
+    sent = now(); item["status"] = "sent"; item["sent_at"] = sent.isoformat(); state["last_posted_time"] = sent.isoformat()
+    if pending(state): rebuild(state, sent + duration(state))
+    else: update_next(state)
+    return True
+
+def main():
+    state = load_state(); changed = updates(state)
+    if changed is None: return 1
+    if changed or post_due(state): save_state(state)
+    return 0
+
+if __name__ == "__main__":
+    try: raise SystemExit(main())
+    except RuntimeError as error: print(f"ERROR: {error}", file=sys.stderr); raise SystemExit(1)
