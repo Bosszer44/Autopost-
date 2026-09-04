@@ -159,7 +159,13 @@ def handle_message(state, message):
 
 def handle_callback(state, callback):
     if not private_admin(state, callback): return False
-    api(state, "answerCallbackQuery", {"callback_query_id": callback["id"]})
+    # Callback queries can expire while GitHub Actions is waiting for its next
+    # scheduled run. Acknowledging an expired callback is optional, so never
+    # let that Telegram API error discard the rest of this run or its state.
+    try:
+        api(state, "answerCallbackQuery", {"callback_query_id": callback["id"]})
+    except TelegramError as error:
+        print(f"WARNING: Could not acknowledge callback: {error}", file=sys.stderr)
     action = callback.get("data"); chat = callback["message"]["chat"]["id"]
     if action == "add_url": state["waiting_for_urls"] = True; control(state, chat, "➕ ส่ง URL ได้หลายบรรทัดในข้อความถัดไป\n/cancel เพื่อยกเลิก")
     elif action == "view_queue": control(state, chat, queue_text(state))
