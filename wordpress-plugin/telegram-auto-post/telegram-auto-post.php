@@ -205,7 +205,21 @@ final class TAP_Telegram_Auto_Post {
 
     private function set_running($bot_id, $running) {
         $bots = $this->bots();
-        if (isset($bots[$bot_id])) { $bots[$bot_id]['running'] = (bool) $running; update_option(self::OPTION, $bots, false); }
+        if (isset($bots[$bot_id])) {
+            $bots[$bot_id]['running'] = (bool) $running;
+            update_option(self::OPTION, $bots, false);
+            if ($running) $this->reschedule_pending($bot_id, (int) $bots[$bot_id]['interval_minutes']);
+        }
+    }
+
+    private function reschedule_pending($bot_id, $interval_minutes) {
+        global $wpdb;
+        $rows = $wpdb->get_results($wpdb->prepare('SELECT id FROM ' . self::table_name() . ' WHERE bot_id = %s AND status = %s ORDER BY created_at ASC, id ASC', $bot_id, 'pending'));
+        $cursor = time();
+        foreach ($rows as $row) {
+            $wpdb->update(self::table_name(), ['scheduled_at' => gmdate('Y-m-d H:i:s', $cursor)], ['id' => $row->id], ['%s'], ['%d']);
+            $cursor += $interval_minutes * 60;
+        }
     }
 
     public function process_queues() {
