@@ -2,45 +2,45 @@
   "queue": [
     {
       "url": "https://avyoufin.com/dldss-510-jav-online/",
-      "status": "pending",
+      "status": "sent",
       "scheduled_at": "2026-09-05T04:11:09.586337+07:00",
-      "sent_at": null
+      "sent_at": "2026-09-05T04:28:05.967862+07:00"
     },
     {
       "url": "https://avyoufin.com/abf-370/",
       "status": "pending",
-      "scheduled_at": "2026-09-05T05:11:09.586337+07:00",
+      "scheduled_at": "2026-09-05T05:28:05.967862+07:00",
       "sent_at": null
     },
     {
       "url": "https://avmasoy.com/hrsm-149/",
       "status": "pending",
-      "scheduled_at": "2026-09-05T06:11:09.586337+07:00",
+      "scheduled_at": "2026-09-05T06:28:05.967862+07:00",
       "sent_at": null
     },
     {
       "url": "https://avmasoy.com/mida-681-japan-av/",
       "status": "pending",
-      "scheduled_at": "2026-09-05T07:11:09.586337+07:00",
+      "scheduled_at": "2026-09-05T07:28:05.967862+07:00",
       "sent_at": null
     },
     {
       "url": "https://avjinny.com/jur-102/",
       "status": "pending",
-      "scheduled_at": "2026-09-05T08:11:09.586337+07:00",
+      "scheduled_at": "2026-09-05T08:28:05.967862+07:00",
       "sent_at": null
     },
     {
       "url": "https://avkissme.com/ofes-042/",
       "status": "pending",
-      "scheduled_at": "2026-09-05T09:11:09.586337+07:00",
+      "scheduled_at": "2026-09-05T09:28:05.967862+07:00",
       "sent_at": null
     }
   ],
   "running": true,
-  "next_run": "2026-09-05T04:11:09.586337+07:00",
+  "next_run": "2026-09-05T05:28:05.967862+07:00",
   "last_update_id": 132164311,
-  "last_posted_time": null,
+  "last_posted_time": "2026-09-05T04:28:05.967862+07:00",
   "interval_minutes": 60,
   "waiting_for_urls": false
 }
