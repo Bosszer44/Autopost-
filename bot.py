@@ -8,6 +8,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
+from time import sleep
 from zoneinfo import ZoneInfo
 
 STATE_FILE = Path("data/state.json")
@@ -189,6 +190,15 @@ def updates(state):
         elif update.get("message"): changed = handle_message(state, update["message"]) or changed
     return changed
 
+def run_worker():
+    while True:
+        state = load_state()
+        changed = updates(state)
+        if changed is None:
+            return 1
+        if changed or post_due(state): save_state(state)
+        sleep(1)
+
 def post_due(state):
     if not state["running"]: return False
     last = parse_time(state.get("last_posted_time"))
@@ -196,7 +206,15 @@ def post_due(state):
     due = [item for item in pending(state) if item.get("scheduled_at") and parse_time(item["scheduled_at"]) <= now()]
     if not due: return False
     item = min(due, key=lambda candidate: candidate["scheduled_at"])
-    try: api(state, "sendMessage", {"chat_id":state["_target"],"text":item["url"],"disable_web_page_preview":"false"})
+    try:
+        api(state, "sendMessage", {
+            "chat_id": state["_target"],
+            "text": item["url"],
+            "link_preview_options": json.dumps({
+                "is_disabled": False,
+                "prefer_large_media": True,
+            }),
+        })
     except TelegramError as error: print(f"WARNING: URL was not sent: {error}", file=sys.stderr); return False
     sent = now(); item["status"] = "sent"; item["sent_at"] = sent.isoformat(); state["last_posted_time"] = sent.isoformat()
     if pending(state): rebuild(state, sent + duration(state))
@@ -204,6 +222,7 @@ def post_due(state):
     return True
 
 def main():
+    if os.environ.get("TELEGRAM_RUN_MODE") == "worker": return run_worker()
     state = load_state(); changed = updates(state)
     if changed is None: return 1
     if changed or post_due(state): save_state(state)
