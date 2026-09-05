@@ -20,27 +20,27 @@
     },
     {
       "url": "https://avmasoy.com/mida-681-japan-av/",
-      "status": "pending",
+      "status": "sent",
       "scheduled_at": "2026-09-05T20:52:53.033836+07:00",
-      "sent_at": null
+      "sent_at": "2026-09-06T00:43:17.209513+07:00"
     },
     {
       "url": "https://avjinny.com/jur-102/",
       "status": "pending",
-      "scheduled_at": "2026-09-05T21:52:53.033836+07:00",
+      "scheduled_at": "2026-09-06T01:43:17.209513+07:00",
       "sent_at": null
     },
     {
       "url": "https://avkissme.com/ofes-042/",
       "status": "pending",
-      "scheduled_at": "2026-09-05T22:52:53.033836+07:00",
+      "scheduled_at": "2026-09-06T02:43:17.209513+07:00",
       "sent_at": null
     }
   ],
   "running": true,
-  "next_run": "2026-09-05T20:52:53.033836+07:00",
+  "next_run": "2026-09-06T01:43:17.209513+07:00",
   "last_update_id": 132164325,
-  "last_posted_time": "2026-09-05T19:52:53.033836+07:00",
+  "last_posted_time": "2026-09-06T00:43:17.209513+07:00",
   "interval_minutes": 60,
   "waiting_for_urls": false
 }
