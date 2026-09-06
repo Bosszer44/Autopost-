@@ -1,6 +1,10 @@
 # Telegram Auto Post Bot
 
-A serverless Telegram URL queue that runs on GitHub Actions every five minutes.
+When the WordPress plugin is installed, Telegram commands and button callbacks
+are handled in real time through the WordPress webhook. The GitHub Actions
+workflow is manual-only so it cannot compete with that webhook for updates.
+
+A serverless Telegram URL queue with a WordPress webhook for real-time controls.
 
 ## Required GitHub Actions secrets
 
@@ -18,4 +22,7 @@ Each successful post contains only the raw URL. The bot sends at most one item p
 
 ## Webhook note
 
-This project uses Telegram `getUpdates` polling. Remove any active Telegram webhook before using it. The bot will stop safely if Telegram reports a webhook conflict.
+The WordPress plugin uses Telegram webhooks for real-time controls. Do not run
+the GitHub Actions workflow with the same bot token while that webhook is
+active. The Python bot uses Telegram `getUpdates` polling and is only suitable
+for a separate bot token or a deliberate manual run after removing the webhook.
