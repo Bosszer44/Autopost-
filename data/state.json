@@ -35,17 +35,11 @@
       "status": "sent",
       "scheduled_at": "2026-09-06T03:34:32.163643+07:00",
       "sent_at": "2026-09-06T04:40:55.524751+07:00"
-    },
-    {
-      "url": "https://avspicyxx.com/dandya-033-av18/",
-      "status": "pending",
-      "scheduled_at": "2026-09-07T02:28:26.968415+07:00",
-      "sent_at": null
     }
   ],
   "running": true,
-  "next_run": "2026-09-07T02:28:26.968415+07:00",
-  "last_update_id": 132164335,
+  "next_run": null,
+  "last_update_id": 132164338,
   "last_posted_time": "2026-09-06T04:40:55.524751+07:00",
   "interval_minutes": 60,
   "waiting_for_urls": false
